@@ -13,31 +13,194 @@ XHS intelligence monitoring · Auto OCR · Hermes ReAct Agent
 
 ## Architecture
 
+Reddy 采用三层架构：**Node.js CLI（表现层）→ Python Agent（核心层）→ 外部服务（能力层）**。三层之间通过 stdin/stdout JSON RPC 实现松耦合通信。
+
+### 整体数据流
+
 ```
-┌──────────────────────────────────────────────────┐
-│              Reddy CLI (Node.js · zero deps)      │
-│  animated logo · spinner · Hermes phase display   │
-│  [Thinking]◆ → [Action]▶ → [Observe]◀ → [Answer]●│
-└────────────────────┬─────────────────────────────┘
-                     │ stdin/stdout JSON RPC
-┌────────────────────┴─────────────────────────────┐
-│            Python Backend (redclaw)               │
-│  ┌─────────────────────────────────────────────┐ │
-│  │        ToolRegistry (25 tools)              │ │
-│  │  fetch_xhs  ocr_*  read_note  save_post   │ │
-│  │  xhs_login  list_notes  search_posts  ...  │ │
-│  └─────────────────────────────────────────────┘ │
-│  ┌─────────────────────────────────────────────┐ │
-│  │           SQLite (~/.reddy/reddy.db)        │ │
-│  │       notes · radars · full-text search     │ │
-│  └─────────────────────────────────────────────┘ │
-└────────────────────┬─────────────────────────────┘
+用户输入（自然语言 / 斜杠命令）
+  │
+  ▼
+┌─────────────────────────────────────────────────────────┐
+│              Reddy CLI (Node.js · 零依赖)                │
+│                                                         │
+│  cli.js ─► agent-loop.js                                │
+│  ├─ 解析命令（/help /config /reset ...）                 │
+│  ├─ spawn Python 子进程                                  │
+│  ├─ 流式事件渲染:                                        │
+│  │   [Thinking] ◆ → [Action] ▶ → [Observe] ◀ → [Answer] ●│
+│  └─ Braille spinner + ANSI 颜色                         │
+└────────────────────┬────────────────────────────────────┘
+                     │ stdin/stdout JSON-RPC（每行一个 JSON）
+                     │ cmd: init | run | list_tools | dispatch
+                     │ stream: true → agent_event 推送
+┌────────────────────┴────────────────────────────────────┐
+│               Python Backend (redclaw)                   │
+│                                                         │
+│  stdio_cli.py  ←── JSON-RPC Server                      │
+│       │                                                 │
+│       ▼                                                 │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │            AIAgent (Hermes ReAct)                │   │
+│  │                                                 │   │
+│  │  run() / run_stream()                           │   │
+│  │    │                                            │   │
+│  │    ├─ 1. 构建 System Prompt                      │   │
+│  │    │     ├─ 工具列表（函数签名 + 描述）            │   │
+│  │    │     └─ Memory 上下文（相关历史记忆）          │   │
+│  │    │                                            │   │
+│  │    ├─ 2. Prefetch Memory（向量检索相关记忆）      │   │
+│  │    │                                            │   │
+│  │    ├─ 3. ReAct Loop（最大 10 轮）                │   │
+│  │    │     ┌──────────────────────────┐           │   │
+│  │    │     │ Thinking  ── LLM 推理     │           │   │
+│  │    │     │    ↓                     │           │   │
+│  │    │     │ Action   ── 解析工具调用  │           │   │
+│  │    │     │    ↓                     │           │   │
+│  │    │     │ Observe  ── 执行工具     │           │   │
+│  │    │     │    ↓                     │           │   │
+│  │    │     │ 结果喂回 LLM → 下一轮     │           │   │
+│  │    │     └──────────────────────────┘           │   │
+│  │    │                                            │   │
+│  │    ├─ 4. Memory Sync（写入新记忆）               │   │
+│  │    │                                            │   │
+│  │    └─ 5. 返回最终文本                             │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌──────────────────────┐  ┌────────────────────────┐  │
+│  │   ToolRegistry (25)  │  │   MemoryManager         │  │
+│  │                      │  │                         │  │
+│  │  内置工具 (10):       │  │  MemoryProvider 接口:    │  │
+│  │  ├─ Data: save_post  │  │  ├─ prefetch(query)     │  │
+│  │  │  search_posts     │  │  ├─ sync(input,output)  │  │
+│  │  │  read_note        │  │  ├─ build_prompt()      │  │
+│  │  │  list_notes       │  │  └─ on_session_end()    │  │
+│  │  ├─ Radar: create    │  │                         │  │
+│  │  │  get/list/generate│  │  内置实现:               │  │
+│  │  └─ IO: read_file    │  │  └─ BuiltinMemory       │  │
+│  │     list_files       │  │    (~/.reddy/memory/)   │  │
+│  │                      │  │                         │  │
+│  │  模块工具 (15):       │  └────────────────────────┘  │
+│  │  ├─ XHS: fetch/search│                              │
+│  │  │  login/status     │  ┌────────────────────────┐  │
+│  │  ├─ OCR: image/url   │  │  SQLite                 │  │
+│  │  │  batch/status     │  │  (~/.reddy/reddy.db)    │  │
+│  │  ├─ Telegram: start  │  │  ├─ posts              │  │
+│  │  │  stop/status      │  │  ├─ radars             │  │
+│  │  └─ Cron: schedule   │  │  └─ scheduled_tasks    │  │
+│  │     list/delete/stat │  └────────────────────────┘  │
+│  └──────────────────────┘                              │
+└────────────────────┬────────────────────────────────────┘
                      │
-     ┌───────────────┼───────────────┐
-     ▼               ▼               ▼
-  MiniMax API   XHS Bridge    Umi-OCR
-  (LLM)         (WebSocket)   (Paddle)
+        ┌────────────┼──────────────┐
+        ▼            ▼              ▼
+   ┌─────────┐ ┌──────────┐ ┌──────────┐
+   │ MiniMax │ │XHS Bridge│ │ Umi-OCR  │
+   │   API   │ │WebSocket │ │ (Paddle) │
+   │         │ │localhost │ │          │
+   │Anthropic│ │ :9333    │ │ 本地 OCR │
+   │Messages │ │          │ │ 引擎     │
+   │兼容端点  │ │Chrome CDP│ │          │
+   │         │ │ 桥接     │ │          │
+   │• Claude │ │          │ │          │
+   │• M2.7   │ │          │ │          │
+   └─────────┘ └──────────┘ └──────────┘
 ```
+
+### Agent 核心：Hermes ReAct 循环
+
+Reddy 的智能核心是 `AIAgent` 类（`redclaw/agent.py:509`），实现了标准的 **ReAct (Reasoning + Acting)** 范式：
+
+#### 两种运行模式
+
+| 模式 | 方法 | 工具调用方式 | 适用场景 |
+|------|------|-------------|---------|
+| **非流式** | `run()` | 正则解析文本中的 `action:` / `参数:` | DeepSeek 等不支持原生 tool_use 的模型 |
+| **流式** | `run_stream()` | Anthropic 原生 `tools` 参数 + `tool_use` content block | MiniMax API（兼容 Claude tool_use） |
+
+#### 流式事件系统
+
+`run_stream()` 通过回调 `on_event(type, data)` 实时推送阶段事件：
+
+```
+session_start → thinking → tool_call → tool_result → ... → text_done
+```
+
+Node.js 前端接收 `agent_event` JSON 消息后渲染为：
+
+```
+[Thinking] ◆ 正在思考...
+[Action]   ▶ fetch_xhs("AI产品经理")
+[Observe]  ◀ 返回 20 条结果
+[Answer]   ● 已为您找到以下内容...
+```
+
+#### 工具调用解析（非流式）
+
+对于不支持原生 tool_use 的模型，使用正则从 LLM 文本输出中提取：
+
+```
+action: fetch_xhs
+参数: {"keyword": "AI产品经理", "max_notes": 10}
+```
+
+工具执行结果以观察形式注入对话：
+
+```
+观察: {"success": true, "count": 10, "notes": [...]}
+
+根据以上结果继续完成任务。
+```
+
+### 通信协议：JSON-RPC
+
+Node.js CLI 和 Python Backend 之间通过 stdin/stdout 行分隔 JSON 通信：
+
+```
+→ {"cmd": "init", "id": 1}
+← {"type": "rpc_result", "id": 1, "success": true, "tools": [...]}
+
+→ {"cmd": "run", "params": {"message": "搜索AI PM"}, "stream": true, "id": 2}
+← {"type": "agent_event", "id": 2, "event": {"type": "thinking", "turn": 1}}
+← {"type": "agent_event", "id": 2, "event": {"type": "tool_call", "name": "fetch_xhs", ...}}
+← {"type": "agent_event", "id": 2, "event": {"type": "text_done", "text": "..."}}
+← {"type": "rpc_result", "id": 2, "success": true, "result": "..."}
+```
+
+**Python 端的关键设计**：`print()` 被重定向到 stderr（`sys.stdout = sys.stderr`），保证 stdout 只走 JSON-RPC 协议，模块内部日志不会污染通信通道。
+
+### Memory 系统
+
+`MemoryManager`（`redclaw/memory.py`）提供可扩展的记忆架构：
+
+```
+MemoryManager
+  ├─ MemoryProvider (抽象接口)
+  │   ├─ prefetch(query)     → 检索相关记忆
+  │   ├─ sync(input, output) → 写入新记忆
+  │   ├─ build_prompt()      → 生成注入 prompt 的记忆块
+  │   └─ on_session_end()    → 会话结束持久化
+  │
+  └─ BuiltinMemoryProvider (~/.reddy/memory/)
+      ├─ user.md      → 用户偏好 / 角色
+      ├─ feedback.md  → 用户反馈 / 规则
+      ├─ project.md   → 项目上下文
+      └─ reference.md → 外部资源引用
+```
+
+每次对话流程中的记忆参与：
+1. **Prefetch**：用户输入 → 检索相关记忆 → 注入 System Prompt
+2. **Sync**：LLM 输出后 → 自动提取可记忆信息 → 写入文件
+3. **Session End**：对话结束 → 持久化会话摘要
+
+### LLM 后端
+
+支持双后端，通过环境变量 `LLM_API` 切换：
+
+| 后端 | 端点 | 协议 | 特点 |
+|------|------|------|------|
+| **MiniMax**（默认）| `api.minimaxi.com/anthropic/v1/messages` | Anthropic Messages API | 原生 `tools` 参数、`tool_use` content block |
+| **DeepSeek** | `api.deepseek.com/v1` | OpenAI Chat Completions | 文本解析模式，正则提取工具调用 |
 
 ## Directory
 
