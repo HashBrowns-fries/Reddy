@@ -1,7 +1,15 @@
-"""BridgePage - 通过浏览器扩展 Bridge 实现与 CDP Page 相同的接口。
+"""
+DEPRECATED: BridgePage 已弃用，请使用 redclaw.xhs.client.XHSClient 替代。
 
+BridgePage - 通过浏览器扩展 Bridge 实现与 CDP Page 相同的接口。
 CLI 命令通过 WebSocket 发送到 bridge_server.py，
 bridge_server 转发给浏览器扩展执行，结果原路返回。
+"""
+import warnings
+warnings.warn(
+    "bridge.BridgePage is deprecated. Use redclaw.xhs.client.XHSClient instead.",
+    DeprecationWarning, stacklevel=2
+)
 
 每次调用都是一次短连接（发一条命令 → 收一条回复），
 不需要维护持久连接。

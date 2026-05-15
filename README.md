@@ -95,13 +95,13 @@ Reddy 采用三层架构：**Node.js CLI（表现层）→ Python Agent（核心
         ┌────────────┼──────────────┐
         ▼            ▼              ▼
    ┌─────────┐ ┌──────────┐ ┌──────────┐
-   │ MiniMax │ │XHS Bridge│ │ Umi-OCR  │
-   │   API   │ │WebSocket │ │ (Paddle) │
-   │         │ │localhost │ │          │
-   │Anthropic│ │ :9333    │ │ 本地 OCR │
-   │Messages │ │          │ │ 引擎     │
-   │兼容端点  │ │Chrome CDP│ │          │
-   │         │ │ 桥接     │ │          │
+   │ MiniMax │ │XHS Client│ │ Umi-OCR  │
+   │   API   │ │API优先    │ │ (Paddle) │
+   │         │ │ + httpx  │ │          │
+   │Anthropic│ │xhshow签名│ │ 本地 OCR │
+   │Messages │ │Playwright│ │ 引擎     │
+   │兼容端点  │ │(登录)    │ │          │
+   │         │ │CDP(回退) │ │          │
    │• Claude │ │          │ │          │
    │• M2.7   │ │          │ │          │
    └─────────┘ └──────────┘ └──────────┘
@@ -202,6 +202,55 @@ MemoryManager
 | **MiniMax**（默认）| `api.minimaxi.com/anthropic/v1/messages` | Anthropic Messages API | 原生 `tools` 参数、`tool_use` content block |
 | **DeepSeek** | `api.deepseek.com/v1` | OpenAI Chat Completions | 文本解析模式，正则提取工具调用 |
 
+### XHS 数据获取架构 (v2 — API 优先)
+
+参考 [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) 的 **xhshow 纯算法签名** 方案，Reddy 的 XHS 数据获取从纯浏览器自动化升级为 **API 优先 + CDP 回退** 混合架构：
+
+```
+           ┌──────────────────────────┐
+           │     XHSClient (门面)      │
+           │                          │
+           │  search_feeds()          │
+           │  get_feed_detail()       │
+           │  login_qrcode()          │
+           └──────────┬───────────────┘
+                      │
+          ┌───────────┴───────────┐
+          ▼                       ▼
+   ┌─────────────┐         ┌─────────────┐
+   │ XHSApiClient │         │  CDP 回退    │
+   │ (httpx)      │         │              │
+   │              │         │ cdp.py       │
+   │ sign.py      │         │ search.py    │
+   │ xhshow 签名   │         │ feed_detail  │
+   │              │         │ login.py     │
+   │ X-S/X-T/     │         │              │
+   │ X-S-Common   │         │ HTML 提取     │
+   │              │         │ __INITIAL_   │
+   │ REST API 调用 │         │ STATE__      │
+   └──────┬───────┘         └──────┬───────┘
+          │                        │
+          │  有 Cookie → API 直达   │  Cookie 过期/失败 → CDP
+          │                        │
+    ┌─────┴─────┐            ┌─────┴─────┐
+    │ 登录态来源  │            │ 浏览器管理  │
+    │           │            │           │
+    │ Playwright│            │ CDP       │
+    │ browser.py│            │ Chrome    │
+    │ login_pw  │            │ --remote- │
+    │           │            │ debugging │
+    │ persistent│            │ -port     │
+    │ _context  │            │           │
+    │ (持久化)   │            │           │
+    └───────────┘            └───────────┘
+```
+
+**核心原理：**
+- **签名**：使用 [xhshow](https://github.com/Cloxl/xhshow) 纯 Python 算法生成 X-S / X-T / X-S-Common 请求头，**无需浏览器执行 JS**
+- **Cookie**：通过 Playwright 登录一次，Cookie（含 a1）自动持久化到 `browser_data/xhs/`，重启后保持登录态
+- **API 优先**：有 Cookie 时直接 httpx + 算法签名调用小红书 REST API，速度远快于浏览器页面加载
+- **CDP 回退**：API 触发验证码或 Cookie 过期时，自动回退到 Chrome CDP HTML 提取
+
 ## Directory
 
 ```
@@ -220,7 +269,7 @@ reddy/
 │   ├── stdio_cli.py    # JSON RPC server (stdin/stdout)
 │   ├── memory.py
 │   ├── gateway/
-│   │   └── telegram.py       # Telegram long-polling gateway
+│   │   └── telegram.py
 │   ├── modules/
 │   │   ├── xhs_tools.py            # fetch_xhs + xhs_login handlers
 │   │   ├── xhs_search_and_save.py  # Legacy batch search
@@ -228,14 +277,20 @@ reddy/
 │   │   ├── telegram_tools.py       # Gateway start/stop/status
 │   │   ├── cron_tools.py           # Scheduled task scheduler
 │   │   └── fetcher.py              # Platform fetcher factory
-│   └── xhs/            # XHS browser bridge (CDP via Chrome extension)
-│       ├── bridge.py           # BridgePage client (ws://localhost:9333)
-│       ├── bridge_server.py   # WebSocket relay
-│       ├── search.py          # Search feeds
-│       ├── feed_detail.py     # Note detail + comments + anti-crawl
-│       ├── login.py           # QR / phone / logout
-│       ├── models.py          # Dataclasses
-│       └── ...
+│   └── xhs/
+│       ├── client.py         # XHSClient: API优先 + CDP回退 (v2)
+│       ├── api.py            # XHSApiClient: httpx + xhshow签名
+│       ├── sign.py           # xhshow 纯算法签名 (X-S/X-T/X-S-Common)
+│       ├── api_adapters.py   # API JSON → models dataclass
+│       ├── browser.py        # Playwright 持久化浏览器
+│       ├── login_pw.py       # Playwright 登录 (QR/手机)
+│       ├── login.py          # CDP 登录 (保留, 回退)
+│       ├── cdp.py            # 原生 CDP WebSocket 客户端
+│       ├── search.py         # CDP 搜索 (保留, 回退)
+│       ├── feed_detail.py    # CDP 详情 + 评论加载 (保留, 回退)
+│       ├── bridge.py         # [DEPRECATED] Chrome扩展桥接
+│       ├── bridge_server.py  # [DEPRECATED] WebSocket中继
+│       └── models.py         # Dataclasses
 └── 经验/               # Saved note JSON files (by session)
 ```
 
@@ -244,6 +299,7 @@ reddy/
 ```bash
 cd reddy
 pip install -e .          # Python deps
+playwright install chromium  # Browser for XHS login
 npm link                  # global "reddy" command
 ```
 
@@ -363,7 +419,7 @@ Other actions: `status` (check if logged in), `logout`.
 - OCR text merged into content for full-text search
 - Anti-crawl: 2-4s delay between notes, QR verification backoff (15/30/60s)
 - `max_notes: 0` = fetch all search results
-- Bridge server + Chrome auto-started if needed
+- API-first: direct REST API calls with xhshow algorithm signatures
 
 ## Telegram Gateway
 
@@ -401,11 +457,13 @@ Recurring agent prompts run on an interval. Tasks persist in SQLite and survive 
 ## Dependencies
 
 - **Node.js**: zero npm packages (built-in modules only)
-- **Python**: `httpx`, `openai`, `websockets`, `requests`
-- **External**: Umi-OCR (auto-discovered), XHS Bridge Chrome extension
+- **Python**: `xhshow`, `httpx`, `openai`, `playwright`, `websockets`, `requests`
+- **External**: Umi-OCR (auto-discovered), Chromium (via `playwright install chromium`)
 
 ## Acknowledgements
 
-- [xiaohongshu-skills](https://github.com/autoclaw-cc/xiaohongshu-skills) — XHS browser automation core (`redclaw/xhs/`): CDP bridge, search, feed detail, login, anti-crawl
+- [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) — XHS API-first architecture reference: xhshow signature integration, Playwright login persistence, anti-crawl patterns
+- [xhshow](https://github.com/Cloxl/xhshow) — Pure Python XHS signature algorithm (X-S / X-T / X-S-Common)
+- [xiaohongshu-skills](https://github.com/autoclaw-cc/xiaohongshu-skills) — Original XHS CDP browser automation core: search, feed detail, login, anti-crawl
 - [Hermes Agent](https://github.com/nousresearch/hermes-agent) — ReAct agent architecture: tool registry, tool use loop, structured thinking/action/observation cycle
 - [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR) — Offline OCR engine (PaddleOCR)

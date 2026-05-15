@@ -9,6 +9,10 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "lxml>=4.9.0",
     "python-multipart>=0.0.6",
+    "httpx>=0.28.0",
+    "xhshow>=0.1.9",
+    "playwright>=1.45.0",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
@@ -22,8 +26,7 @@ dev = [
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages]
-find = {}
+[tool.setuptools.packages.find]
 where = ["."]
-include = ["reddy*"]
+include = ["redclaw*"]
 exclude = ["tests*"]

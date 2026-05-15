@@ -12,7 +12,7 @@ from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
-from redclaw.xhs.bridge import BridgePage
+from redclaw.xhs.client import XHSClient
 
 # ============== 配置 ==============
 SEARCH_KEYWORD = ""
@@ -69,32 +69,23 @@ def random_delay(min_sec=None, max_sec=None):
     print(f"  ⏳ 等待 {delay:.1f}s...")
     time.sleep(delay)
 
-def init_bridge():
-    """初始化bridge连接"""
-    bridge = BridgePage()
-    return bridge
+def init_client():
+    """初始化 XHS 客户端"""
+    return XHSClient()
 
-def search_notes(keyword: str, page=None) -> list:
+def search_notes(keyword: str, client=None) -> list:
     """搜索笔记"""
-    from redclaw.xhs.search import search_feeds
-
-    feeds = search_feeds(
-        page or init_bridge(),
-        keyword=keyword,
-        filter_option=None  # 不使用筛选条件
-    )
+    c = client or init_client()
+    feeds = c.search_feeds(keyword=keyword)
     return feeds
 
-def get_note_detail(feed_id: str, xsec_token: str, page=None) -> dict:
+def get_note_detail(feed_id: str, xsec_token: str, client=None) -> dict:
     """获取笔记详情"""
-    from redclaw.xhs.feed_detail import get_feed_detail, FeedDetailResponse
-
-    result = get_feed_detail(
-        page or init_bridge(),
+    c = client or init_client()
+    result = c.get_feed_detail(
         feed_id=feed_id,
         xsec_token=xsec_token,
         load_all_comments=False,
-        config=None
     )
     random_delay()
     return result

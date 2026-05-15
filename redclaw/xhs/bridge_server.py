@@ -1,7 +1,15 @@
-"""XHS Extension Bridge Server
+"""
+DEPRECATED: Bridge Server 已弃用，请使用 redclaw.xhs.client.XHSClient 替代。
 
+XHS Extension Bridge Server
 Extension 连接到这里（WebSocket），CLI 命令通过同一端口发送（role=cli），
 Bridge 将命令路由给 Extension 并把结果返回给 CLI。
+"""
+import warnings
+warnings.warn(
+    "bridge_server is deprecated. Use redclaw.xhs.client.XHSClient instead.",
+    DeprecationWarning, stacklevel=2
+)
 
 启动方式：
     python scripts/bridge_server.py

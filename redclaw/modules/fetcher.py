@@ -11,9 +11,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 
 try:
-    from redclaw.xhs.bridge import BridgePage
-    from redclaw.xhs.search import search_feeds
-    from redclaw.xhs.feed_detail import get_feed_detail
+    from redclaw.xhs.client import XHSClient
     HAS_XHS = True
 except ImportError:
     HAS_XHS = False
@@ -66,16 +64,16 @@ class XiaohongshuFetcher:
 
         all_posts = []
         visited = self._load_visited()
-        bridge = None
+        client = None
 
         for keyword in keywords:
             print(f"\n🔍 搜索: {keyword}")
             self._random_delay()
 
             try:
-                if bridge is None:
-                    bridge = BridgePage()
-                feeds = search_feeds(bridge, keyword=keyword, filter_option=None)
+                if client is None:
+                    client = XHSClient()
+                feeds = client.search_feeds(keyword=keyword)
                 print(f"  ✅ 找到 {len(feeds)} 条笔记")
             except Exception as e:
                 print(f"  ❌ 搜索失败: {e}")
@@ -96,7 +94,7 @@ class XiaohongshuFetcher:
                 # 获取详情
                 try:
                     self._random_delay()
-                    detail = get_feed_detail(bridge, note_id, xsec_token, load_all_comments=False)
+                    detail = client.get_feed_detail(note_id, xsec_token, load_all_comments=False)
                     note_info = detail.note.to_dict()
                 except Exception as e:
                     print(f"  ❌ 获取详情失败: {e}")
@@ -115,6 +113,8 @@ class XiaohongshuFetcher:
                 if (i + 1) % 5 == 0:
                     time.sleep(10)
 
+        if client:
+            client.close()
         return all_posts
 
     def _build_post(self, note_info: dict) -> dict:
