@@ -49,6 +49,13 @@ def save_visited_note(note_data: dict):
     with open(VISITED_FILE, 'w', encoding='utf-8') as f:
         json.dump(visited, f, ensure_ascii=False, indent=2)
 
+def set_output_dir(path: str):
+    """设置输出目录"""
+    global OUTPUT_DIR, IMAGE_SAVE_DIR, VISITED_FILE
+    OUTPUT_DIR = Path(path)
+    IMAGE_SAVE_DIR = OUTPUT_DIR / "images"
+    VISITED_FILE = OUTPUT_DIR / "visited_notes.json"
+
 def get_session_dir() -> Path:
     """获取当前会话文件夹路径"""
     return SESSION_DIR or OUTPUT_DIR

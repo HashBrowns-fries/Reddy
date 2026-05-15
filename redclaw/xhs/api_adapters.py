@@ -21,89 +21,94 @@ from .models import (
 )
 
 
+def _get(d: dict, *keys: str, default=None):
+    """Try multiple key formats (snake_case, camelCase)"""
+    for k in keys:
+        if k in d:
+            return d[k]
+    return default
+
+
 def adapt_search_items(items: List[Dict]) -> List[Feed]:
     """API 搜索响应 items → Feed 列表
 
-    API 搜索响应的 items 结构与 __INITIAL_STATE__ 中的 Feed 结构非常相似:
-      item.id → Feed.id
-      item.modelType → Feed.model_type
-      item.xsecToken → Feed.xsec_token
-      item.noteCard → Feed.note_card
+    API 返回 snake_case (note_card, display_title, xsec_token...)
+    兼容 camelCase (noteCard, displayTitle, xsecToken...)
     """
     feeds = []
     for item in items:
-        note_card_data = item.get("noteCard", {})
+        nc = item.get("note_card") or item.get("noteCard") or {}
 
         feeds.append(Feed(
-            xsec_token=item.get("xsecToken", ""),
-            id=item.get("id", ""),
-            model_type=item.get("modelType", ""),
+            xsec_token=_get(item, "xsec_token", "xsecToken", default=""),
+            id=_get(item, "id", default=""),
+            model_type=_get(item, "model_type", "modelType", default=""),
             note_card=NoteCard(
-                type=note_card_data.get("type", ""),
-                display_title=note_card_data.get("displayTitle", ""),
+                type=_get(nc, "type", default=""),
+                display_title=_get(nc, "display_title", "displayTitle", default=""),
                 user=User(
-                    user_id=note_card_data.get("user", {}).get("userId", ""),
-                    nickname=note_card_data.get("user", {}).get("nickname", ""),
-                    nick_name=note_card_data.get("user", {}).get("nickName", ""),
-                    avatar=note_card_data.get("user", {}).get("avatar", ""),
+                    user_id=_get(nc.get("user", {}), "user_id", "userId", default=""),
+                    nickname=_get(nc.get("user", {}), "nickname", default=""),
+                    nick_name=_get(nc.get("user", {}), "nick_name", "nickName", default=""),
+                    avatar=_get(nc.get("user", {}), "avatar", default=""),
                 ),
                 interact_info=InteractInfo(
-                    liked=note_card_data.get("interactInfo", {}).get("liked", False),
-                    liked_count=str(note_card_data.get("interactInfo", {}).get("likedCount", "0")),
-                    shared_count=str(note_card_data.get("interactInfo", {}).get("sharedCount", "0")),
-                    comment_count=str(note_card_data.get("interactInfo", {}).get("commentCount", "0")),
-                    collected_count=str(note_card_data.get("interactInfo", {}).get("collectedCount", "0")),
-                    collected=note_card_data.get("interactInfo", {}).get("collected", False),
+                    liked=_get(nc.get("interact_info", nc.get("interactInfo", {})), "liked", default=False),
+                    liked_count=str(_get(nc.get("interact_info", nc.get("interactInfo", {})), "liked_count", "likedCount", default="0")),
+                    shared_count=str(_get(nc.get("interact_info", nc.get("interactInfo", {})), "shared_count", "sharedCount", default="0")),
+                    comment_count=str(_get(nc.get("interact_info", nc.get("interactInfo", {})), "comment_count", "commentCount", default="0")),
+                    collected_count=str(_get(nc.get("interact_info", nc.get("interactInfo", {})), "collected_count", "collectedCount", default="0")),
+                    collected=_get(nc.get("interact_info", nc.get("interactInfo", {})), "collected", default=False),
                 ),
                 cover=Cover(
-                    width=note_card_data.get("cover", {}).get("width", 0),
-                    height=note_card_data.get("cover", {}).get("height", 0),
-                    url=note_card_data.get("cover", {}).get("url", ""),
-                    file_id=note_card_data.get("cover", {}).get("fileId", ""),
-                    url_pre=note_card_data.get("cover", {}).get("urlPre", ""),
-                    url_default=note_card_data.get("cover", {}).get("urlDefault", ""),
-                    info_list=[
-                        ImageInfo(
-                            image_scene=i.get("imageScene", ""),
-                            url=i.get("url", ""),
-                        )
-                        for i in note_card_data.get("cover", {}).get("infoList", [])
-                    ],
+                    width=_get(nc.get("cover", {}), "width", default=0),
+                    height=_get(nc.get("cover", {}), "height", default=0),
+                    url=_get(nc.get("cover", {}), "url", default=""),
+                    file_id=_get(nc.get("cover", {}), "file_id", "fileId", default=""),
+                    url_pre=_get(nc.get("cover", {}), "url_pre", "urlPre", default=""),
+                    url_default=_get(nc.get("cover", {}), "url_default", "urlDefault", default=""),
                 ),
             ),
-            index=item.get("index", 0),
+            index=_get(item, "index", default=0),
         ))
     return feeds
 
 
 def adapt_feed_detail(note_card: Dict, note_id: str = "", xsec_token: str = "") -> FeedDetail:
-    """API feed 详情响应 note_card → FeedDetail
-
-    API GET /api/sns/web/v1/feed 返回的 note_card 结构:
-      note_card.noteId, note_card.title, note_card.desc, note_card.type,
-      note_card.time, note_card.ipLocation, note_card.user, note_card.interactInfo,
-      note_card.imageList[].urlDefault / urlPre / width / height
-    """
+    """API feed 详情响应 note_card → FeedDetail"""
     image_list = []
-    for img in note_card.get("imageList", []) or []:
+    for img in (note_card.get("image_list") or note_card.get("imageList") or []):
         image_list.append(DetailImageInfo(
-            width=img.get("width", 0),
-            height=img.get("height", 0),
-            url_default=img.get("urlDefault", ""),
-            url_pre=img.get("urlPre", ""),
-            live_photo=img.get("livePhoto", False),
+            width=_get(img, "width", default=0),
+            height=_get(img, "height", default=0),
+            url_default=_get(img, "url_default", "urlDefault", default=""),
+            url_pre=_get(img, "url_pre", "urlPre", default=""),
+            live_photo=_get(img, "live_photo", "livePhoto", default=False),
         ))
 
+    interact_data = note_card.get("interact_info") or note_card.get("interactInfo") or {}
     return FeedDetail(
-        note_id=note_card.get("noteId", note_id),
-        xsec_token=note_card.get("xsecToken", xsec_token),
-        title=note_card.get("title", ""),
-        desc=note_card.get("desc", ""),
-        type=note_card.get("type", ""),
-        time=note_card.get("time", 0),
-        ip_location=note_card.get("ipLocation", ""),
-        user=User.from_dict(note_card.get("user", {})),
-        interact_info=InteractInfo.from_dict(note_card.get("interactInfo", {})),
+        note_id=_get(note_card, "note_id", "noteId", default=note_id),
+        xsec_token=_get(note_card, "xsec_token", "xsecToken", default=xsec_token),
+        title=_get(note_card, "title", default=""),
+        desc=_get(note_card, "desc", default=""),
+        type=_get(note_card, "type", default=""),
+        time=_get(note_card, "time", default=0),
+        ip_location=_get(note_card, "ip_location", "ipLocation", default=""),
+        user=User(
+            user_id=_get(note_card.get("user", {}), "user_id", "userId", default=""),
+            nickname=_get(note_card.get("user", {}), "nickname", default=""),
+            nick_name=_get(note_card.get("user", {}), "nick_name", "nickName", default=""),
+            avatar=_get(note_card.get("user", {}), "avatar", default=""),
+        ),
+        interact_info=InteractInfo(
+            liked=_get(interact_data, "liked", default=False),
+            liked_count=str(_get(interact_data, "liked_count", "likedCount", default="0")),
+            shared_count=str(_get(interact_data, "shared_count", "sharedCount", default="0")),
+            comment_count=str(_get(interact_data, "comment_count", "commentCount", default="0")),
+            collected_count=str(_get(interact_data, "collected_count", "collectedCount", default="0")),
+            collected=_get(interact_data, "collected", default=False),
+        ),
         image_list=image_list,
     )
 
@@ -111,33 +116,34 @@ def adapt_feed_detail(note_card: Dict, note_id: str = "", xsec_token: str = "") 
 def adapt_comment(comment_data: Dict) -> Comment:
     """API 评论数据 → Comment"""
     return Comment(
-        id=comment_data.get("id", ""),
-        note_id=comment_data.get("noteId", ""),
-        content=comment_data.get("content", ""),
-        like_count=str(comment_data.get("likeCount", "0")),
-        create_time=comment_data.get("createTime", 0),
-        ip_location=comment_data.get("ipLocation", ""),
-        liked=comment_data.get("liked", False),
-        user_info=User.from_dict(comment_data.get("userInfo", {})),
-        sub_comment_count=str(comment_data.get("subCommentCount", "0")),
-        sub_comments=[adapt_comment(c) for c in comment_data.get("subComments", []) or []],
-        show_tags=comment_data.get("showTags", []) or [],
+        id=_get(comment_data, "id", default=""),
+        note_id=_get(comment_data, "note_id", "noteId", default=""),
+        content=_get(comment_data, "content", default=""),
+        like_count=str(_get(comment_data, "like_count", "likeCount", default="0")),
+        create_time=_get(comment_data, "create_time", "createTime", default=0),
+        ip_location=_get(comment_data, "ip_location", "ipLocation", default=""),
+        liked=_get(comment_data, "liked", default=False),
+        user_info=User(
+            user_id=_get(comment_data.get("user_info") or comment_data.get("userInfo") or {}, "user_id", "userId", default=""),
+            nickname=_get(comment_data.get("user_info") or comment_data.get("userInfo") or {}, "nickname", default=""),
+            nick_name=_get(comment_data.get("user_info") or comment_data.get("userInfo") or {}, "nick_name", "nickName", default=""),
+            avatar=_get(comment_data.get("user_info") or comment_data.get("userInfo") or {}, "avatar", default=""),
+        ),
+        sub_comment_count=str(_get(comment_data, "sub_comment_count", "subCommentCount", default="0")),
+        sub_comments=[adapt_comment(c) for c in (
+            comment_data.get("sub_comments") or comment_data.get("subComments") or []
+        )],
+        show_tags=comment_data.get("show_tags") or comment_data.get("showTags") or [],
     )
 
 
 def adapt_comments(comments_data: Dict) -> CommentList:
-    """API 评论响应 → CommentList
-
-    API GET /api/sns/web/v2/comment/page 响应:
-      comments_data.comments[] → Comment
-      comments_data.cursor → cursor
-      comments_data.has_more → hasMore
-    """
+    """API 评论响应 → CommentList"""
     comments = [adapt_comment(c) for c in comments_data.get("comments", []) or []]
     return CommentList(
         list_=comments,
-        cursor=comments_data.get("cursor", ""),
-        has_more=comments_data.get("hasMore", False),
+        cursor=_get(comments_data, "cursor", default=""),
+        has_more=_get(comments_data, "has_more", "hasMore", default=False),
     )
 
 

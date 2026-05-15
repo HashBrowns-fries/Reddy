@@ -138,11 +138,16 @@ class XHSClient:
         from .login import save_qrcode_to_file
         path = save_qrcode_to_file(png_bytes)
 
+        # 生成 ASCII 字符画 (终端直接展示)
+        from .qr_ascii import render_qrcode_ascii
+        qr_ascii = render_qrcode_ascii(png_bytes)
+
         return {
             "success": True,
             "qr_path": path,
             "qr_base64": b64_str,
-            "instruction": "Open XHS app to scan the QR code. Then call login_wait() to wait for completion.",
+            "qr_ascii": qr_ascii,
+            "instruction": "Open XHS app to scan the QR code. Call xhs_login action=wait after scanning.",
         }
 
     def login_wait(self, timeout: float = 120.0) -> dict:
