@@ -1,0 +1,9 @@
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+*.egg-info/
+经验/
+*.db
+.env
+.DS_Store

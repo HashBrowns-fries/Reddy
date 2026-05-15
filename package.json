@@ -1,0 +1,22 @@
+{
+  "name": "reddy",
+  "version": "0.2.0",
+  "description": "Reddy Agent CLI - Hermes-style vertical intelligence agent",
+  "type": "module",
+  "bin": {
+    "reddy": "./cli.js"
+  },
+  "files": [
+    "cli.js",
+    "cli/",
+    "redclaw/",
+    "skills/"
+  ],
+  "scripts": {
+    "start": "node cli.js",
+    "dev": "node cli.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

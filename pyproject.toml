@@ -1,0 +1,29 @@
+[project]
+name = "reddy"
+version = "0.1.0"
+description = "Reddy - 垂直情报Agent (小红书 + OCR + 情报雷达)"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0.0",
+    "requests>=2.28.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages]
+find = {}
+where = ["."]
+include = ["reddy*"]
+exclude = ["tests*"]
