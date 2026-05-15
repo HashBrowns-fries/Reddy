@@ -339,6 +339,33 @@ Natural language queries are routed to the LLM agent with automatic tool selecti
 ❯ Generate a daily brief for my PM radar
 ```
 
+### 工具调用示例
+
+Agent 会自动选择合适的工具执行任务，也可以手动调用：
+
+```bash
+# 多关键词搜索
+> /tools call fetch_xhs {"keywords": ["产品经理", "AI产品"], "max_per_keyword": 5}
+
+# 单关键词搜索
+> /tools call fetch_xhs_by_keyword {"keyword": "DeepSeek", "max_notes": 10}
+
+# 登录
+> /tools call xhs_login {"action": "qr"}
+
+# 阅读存过的笔记
+> /tools call read_note {"note_id": "66fad51c000000001b0224b8"}
+
+# 全文搜索本地数据库
+> /tools call search_posts {"query": "RAG"}
+
+# 创建监控雷达
+> /tools call create_radar {"radar_id": "ai-products", "name": "AI产品雷达", "keywords": ["AI产品经理", "大模型应用", "SaaS"]}
+
+# 生成日报
+> /tools call generate_brief {"radar_id": "ai-products"}
+```
+
 ## Tools
 
 ### XHS
@@ -347,7 +374,7 @@ Natural language queries are routed to the LLM agent with automatic tool selecti
 | `fetch_xhs` | Search XHS by keywords, auto OCR images, save to DB |
 | `fetch_xhs_by_keyword` | Single keyword XHS search |
 | `xhs_login` | Login/logout/status (QR scan or phone code) |
-| `xhs_status` | Check bridge server + extension status |
+| `xhs_status` | Check API availability + login status |
 
 ### Data
 | Tool | Description |
@@ -392,34 +419,77 @@ Natural language queries are routed to the LLM agent with automatic tool selecti
 
 ## XHS Login
 
-Two login methods via the `xhs_login` tool:
+XHS 登录通过 **Playwright 浏览器** 完成（首次自动打开 Chrome，后续复用持久化登录态）。
 
-**QR code scan:**
-```
-xhs_login action=qr        → get QR image
-                         → scan with XHS app
-xhs_login action=wait      → wait for completion
-```
+### Quick Start
 
-**Phone code:**
+在 reddy 对话中直接说：
+
 ```
-xhs_login action=send_code phone=138xxxx → receive SMS
-xhs_login action=submit_code code=123456 → complete login
+> 登录小红书
 ```
 
-Other actions: `status` (check if logged in), `logout`.
+Agent 会自动调用 `xhs_login` 工具。
+
+### 手动调用
+
+**扫码登录 (推荐):**
+```
+> xhs_login action=qr           → 获取二维码图片
+                                → 用小红书 App 扫码
+> xhs_login action=wait         → 等待扫码完成
+```
+
+二维码图片保存在 `%TEMP%/xhs/login_qrcode.png`，也可以通过 `qr_base64` 字段直接展示。
+
+**手机验证码:**
+```
+> xhs_login action=send_code phone=138xxxx   → 获取短信验证码
+> xhs_login action=submit_code code=123456   → 提交验证码登录
+```
+
+**状态与登出:**
+```
+> xhs_login action=status        → 检查登录状态
+> xhs_login action=logout        → 退出登录
+```
+
+### 登录态持久化
+
+登录成功后 Cookie 自动保存在 `~/.reddy/xhs/cookies.json`，浏览器数据保存在 `browser_data/xhs/`。下次启动时自动恢复登录态，无需重新扫码。
+
+### 纯命令行模式（CDP 回退）
+
+如果不想用 Playwright，可以手动启动 Chrome 调试端口：
+
+```bash
+chrome --remote-debugging-port=9222
+```
+
+Reddy 会自动检测并连接已有 Chrome 实例（通过 `cdp.py` + `login.py` 走 HTML 提取回退）。
 
 ## XHS Fetch Flow
 
 ```
-1. Search → 2. Fetch every note detail → 3. Download images
-      → 4. Auto OCR → 5. Save JSON + SQLite → 6. Return structured result
+┌─ API 路径 (有 Cookie)
+│  1. xhshow 签名 → POST /api/sns/web/v1/search/notes
+│  2. 获取 note_card → 适配为 Feed 列表
+│  3. POST /api/sns/web/v1/feed → 获取详情
+│  4. 延迟 2-4s (反爬)
+│
+├─ CDP 回退 (无 Cookie / API 触发验证码)
+│  1. Chrome 打开搜索结果页 → 读 __INITIAL_STATE__
+│  2. 打开详情页 → 读 noteDetailMap
+│  3. 延迟 2-4s + QR 验证退避 (15/30/60s)
+│
+└─ 后处理 (两种路径共享)
+    → Download images → Auto OCR → Save JSON + SQLite → Return result
 ```
 
 - OCR text merged into content for full-text search
 - Anti-crawl: 2-4s delay between notes, QR verification backoff (15/30/60s)
 - `max_notes: 0` = fetch all search results
-- API-first: direct REST API calls with xhshow algorithm signatures
+- API 路径速度远快于 CDP (毫秒级 vs 秒级)
 
 ## Telegram Gateway
 
